@@ -1,0 +1,48 @@
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from app import schemas
+from app.security import get_current_user
+from app.database import get_db
+from app.crud import wallet_crud as crud 
+from app.services import transaction_service
+from app.services.wallet_service import deposit_service, withdraw_service
+from app.services.wallet_service import deposit_service, withdraw_service, get_transaction_history
+from core.rate_limiter import rate_limit_user
+router = APIRouter(tags=["Wallet"])
+
+@router.get("/balance")
+def get_wallet_balance(current_user = Depends(get_current_user)):
+    return {"balance": current_user.wallet.balance}
+@router.post("/deposit")
+def deposit_money(request: schemas.DepositRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    updated_wallet = deposit_service(db, current_user.wallet.id, request.amount)
+    return {"message": "Deposit successful", "new_balance": updated_wallet.balance}
+
+@router.post("/withdraw")
+def withdraw_money(request: schemas.WithdrawRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    updated_wallet = withdraw_service(db, current_user.wallet.id, request.amount)
+    return {"message": "Withdrawal successful", "new_balance": updated_wallet.balance}
+
+@router.post("/transfer")
+async def transfer_money(
+    request: schemas.TransferRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    _ = Depends(rate_limit_user)
+):
+   
+    updated_wallet = await transaction_service.process_transfer(
+        db, current_user, request.receiver_email, request.amount
+    )
+
+    return {
+        "message": "Transfer successful",
+        "new_balance": updated_wallet.balance
+    }
+@router.get("/transactions", response_model=list[schemas.TransactionResponse])
+def get_history(
+    transaction_type: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    return get_transaction_history(db, current_user.wallet.id, transaction_type)
