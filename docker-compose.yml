@@ -7,8 +7,37 @@ services:
     restart: on-failure
     env_file:
       - .env
+    environment:
+      - PYTHONPATH=/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
       - db
+      - redis
+      - fraud-api
+
+  celery-worker:
+    build: . 
+    container_name: celery_worker
+    command: celery -A app.core.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    depends_on:
+      - db
+      - redis
+    restart: on-failure
+
+  fraud-api:
+    build: ./FRAUD_DETECTION_API
+    container_name: fraud_detector
+    ports:
+      - "8001:8001"
+    restart: on-failure
+    environment:
+      - PYTHONPATH=.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001
+    depends_on:
       - redis
 
   db:
@@ -22,6 +51,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
   redis:
     image: redis:7
     container_name: redis_cache

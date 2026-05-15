@@ -1,5 +1,5 @@
 from fastapi import HTTPException, Depends
-from core.redis_client import redis_client
+from app.core.redis_client import redis_client
 from app.security import get_current_user
 
 def rate_limit_user(current_user = Depends(get_current_user), limit: int = 5, window: int = 60):

@@ -1,28 +1,25 @@
-from fastapi import FastAPI
-import logging
 import time
+import logging
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
-
-# --- UPDATED IMPORTS ---
+# --- INTERNAL IMPORTS ---
 from app.database import engine
 from app import models
-# Import from the new location we created
 from app.api.endpoints import users, wallet 
-# 1. Setup Professional Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-# 2. Initialize FastAPI
+from app.middleware.tracing import TracingMiddleware
+from app.core.logging_config import logger # Use our new structured logger
+# 1. Initialize FastAPI First
 app = FastAPI(
     title="Sentinel Financial Ecosystem", 
     description="A secure fintech backend with microservices integration.",
     version="1.0.0"
 )
 
-# 3. Database Startup Event
+# 2. Register Middleware (Must happen AFTER app initialization)
+app.add_middleware(TracingMiddleware)
+
+# 3. Database Startup Event (Resilience Logic)
 @app.on_event("startup")
 def startup_event():
     retries = 5
@@ -32,31 +29,36 @@ def startup_event():
             models.Base.metadata.create_all(bind=engine)
             logger.info("Database connected successfully!")
             break
-        except OperationalError:
+        except OperationalError as e:
             retries -= 1
-            logger.warning(f"Database not ready. Retrying in 2 seconds... ({retries} retries left)")
+            logger.warning(f"Database not ready ({e}). Retrying in 2s... ({retries} left)")
             time.sleep(2)
     
     if retries == 0:
-        logger.error("Could not connect to the database. Exiting.")
+        logger.error("CRITICAL: Could not connect to database. Service may fail.")
 
-# 4. Include Routers (With Corrected Prefixes)
-# This is the "Control Center" for your URLs.
-# Note: Ensure you removed prefix="/wallet" from wallet.py and prefix="/users" from users.py
+# 4. Include Routers
+# Using prefixes here keeps the individual router files clean.
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(wallet.router, prefix="/wallet", tags=["Wallet"])
 
-# 5. Root Health Check
-@app.get("/")
+@app.get("/", tags=["Health"])
 def root():
+    # --- ADD THIS LINE ---
+    logger.info("The root endpoint was accessed!") 
+    # ---------------------
     return {
         "status": "Online",
         "service": "Sentinel Financial API",
         "documentation": "/docs"
     }
 
-# 6. Global Exception Handler
+# 6. Global Exception Handler (Observability)
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global error caught: {exc}")
-    return {"detail": "An internal server error occurred. Please check logs."}
+async def global_exception_handler(request: Request, exc: Exception):
+    # This will now include the [TX-ID] because of our TracingMiddleware
+    logger.error(f"Global error caught: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Reference the transaction ID in headers."}
+    )
