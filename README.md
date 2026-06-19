@@ -4,29 +4,24 @@
 
 ```mermaid
 graph TD
-    %% Define System Actors
-    Client[Mobile/Postman Client] -->|1. REST Request + Idempotency-Key| FastAPI[FastAPI Core API]
+    Client[Client Browser/Postman] -->|1. Request| FastAPI[FastAPI Core API]
     
-    %% Idempotency Flow
     subgraph Data Layer
-        FastAPI -->|2. Check/Lock Key| RedisCache[(Redis Idempotency Cache)]
-        FastAPI -->|4. Row Lock & Execute Ledger| Postgres[(PostgreSQL Database)]
+        FastAPI -->|2. Check Key| RedisCache[(Redis Idempotency Cache)]
+        FastAPI -->|4. Row Lock| Postgres[(PostgreSQL Database)]
     end
     
-    %% Async Job Processing
     subgraph Background Workers
-        FastAPI -->|5. Enqueue Email Event| RedisBroker[(Redis Message Broker)]
-        RedisBroker -->|6. Fetch Task| Celery[Celery Async Worker]
+        FastAPI -->|5. Enqueue| RedisBroker[(Redis Message Broker)]
+        RedisBroker -->|6. Fetch| Celery[Celery Async Worker]
     end
     
-    %% Observability Stack
     subgraph Monitoring Stack
-        Prometheus[Prometheus Server] -->|7. Scrape /metrics HTTP| FastAPI
-        Grafana[Grafana Dashboard] -->|8. Pull Time-Series Data| Prometheus
-        OTel[OpenTelemetry Tracing] -.->|Instruments System Flow| FastAPI
+        Prometheus[Prometheus Server] -->|7. Scrape| FastAPI
+        Grafana[Grafana Dashboard] -->|8. Pull| Prometheus
+        OTel[OpenTelemetry] -.->|Trace| FastAPI
     end
 
-    %% Styling for visual appeal
     style Client fill:#f9f,stroke:#333,stroke-width:2px
     style FastAPI fill:#bbf,stroke:#333,stroke-width:2px
     style Postgres fill:#bfb,stroke:#333,stroke-width:2px
