@@ -1,20 +1,20 @@
-import uuid
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from app.core.logging_config import request_id_ctx
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-class TracingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Check if an ID already exists (from another service), otherwise create one
-        tx_id = request.headers.get("X-Request-ID", f"TX-{uuid.uuid4().hex[:8].upper()}")
-        
-        # Set the context for the logger
-        token = request_id_ctx.set(tx_id)
-        
-        try:
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = tx_id
-            return response
-        finally:
-            # Clean up context after request finishes
-            request_id_ctx.reset(token)
+def setup_tracing(app):
+    # 1. Initialize the global tracer provider
+    provider = TracerProvider()
+    trace.set_tracer_provider(provider)
+
+    # 2. Configure the collector endpoint (pointing to our future monitoring container)
+    otlp_exporter = OTLPSpanExporter(endpoint="http://tempo:4317", insecure=True)
+    
+    # 3. Add the processor to batch traces efficiently
+    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+
+    # 4. Instrument FastAPI automatically
+    FastAPIInstrumentor.instrument_app(app)

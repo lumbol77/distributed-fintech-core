@@ -8,6 +8,7 @@ from app.services import transaction_service
 from app.services.wallet_service import deposit_service, withdraw_service
 from app.services.wallet_service import deposit_service, withdraw_service, get_transaction_history
 from app.core.rate_limiter import rate_limit_user
+from app.core.tasks import process_wallet_transaction
 
 router = APIRouter(tags=["Wallet"])
 @router.get("/balance")
@@ -23,6 +24,14 @@ def withdraw_money(request: schemas.WithdrawRequest, db: Session = Depends(get_d
     updated_wallet = withdraw_service(db, current_user.wallet.id, request.amount)
     return {"message": "Withdrawal successful", "new_balance": updated_wallet.balance}
 
+@router.post("/wallet/test-queue")
+async def test_queue(sender_id: int=1, receiver_email: str = "test@example.com",amount: float=100.0):
+    process_wallet_transaction.delay(
+        sender_id=sender-id,
+        receiver_email=receiver_email,
+        amount=amount
+    )
+    return{"status:" "success", "message": "celery jobs push to redis broker successfully"}
 @router.post("/wallet/transfer")
 async def transfer_money(
     request: schemas.TransferRequest,
@@ -34,7 +43,12 @@ async def transfer_money(
     updated_wallet = await transaction_service.process_transfer(
         db, current_user, request.receiver_email, request.amount
     )
-
+    # Background job queue
+process_wallet_transaction.delay(
+    sender_id=current_user.id,
+    receiver_email=request.receiver_email,
+    amount=request.amount
+)
     return {
         "message": "Transfer successful",
         "new_balance": updated_wallet.balance
