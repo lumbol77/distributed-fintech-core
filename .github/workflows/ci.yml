@@ -1,4 +1,4 @@
-name: Sentinel CI — Test Suite
+name: Sentinel CI Test Suite
 
 on:
   push:
