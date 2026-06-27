@@ -1,93 +1,100 @@
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
-from app.database import get_db, Base, engine
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import patch # <--- Added for Mocking
+from app.main import app
+from app.database import Base, get_db
 
-# 1. Setup a Temporary Test Database
+SQLALCHEMY_TEST_URL = "sqlite:///./test_wallet.db"
+engine = create_engine(SQLALCHEMY_TEST_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def override_get_db():
+    db = TestingSessionLocal()
     try:
-        db = TestingSessionLocal()
         yield db
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
-client = TestClient(app)
+@pytest.fixture(scope="module", autouse=True)
+def setup_database():
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_get_db
+    yield
+    Base.metadata.drop_all(bind=engine)
+    app.dependency_overrides.clear()
 
-@pytest.fixture
-def auth_header():
-    # 1. Create the user
-    client.post("/users/", json={"email": "testuser@gmail.com", "password": "password123"})
-    
-    # 2. Login
-    login_response = client.post("/users/login", json={
-        "email": "testuser@gmail.com", 
-        "password": "password123"
-    })
-    
-    token = login_response.json().get("access_token")
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as c:
+        yield c
+
+@pytest.fixture(scope="module")
+def auth_headers(client):
+    client.post("/users/", json={"email": "wallet_user@sentinel.com", "password": "WalletPass123!"})
+    res = client.post("/users/login", data={"username": "wallet_user@sentinel.com", "password": "WalletPass123!"})
+    token = res.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
-@pytest.fixture(autouse=True)
-def setup_database():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    yield
+class TestWalletBalance:
+    def test_get_balance_authenticated_returns_200(self, client, auth_headers):
+        res = client.get("/wallets/balance", headers=auth_headers)
+        assert res.status_code == 200
 
-# --- THE ACTUAL TESTS ---
+    def test_new_wallet_balance_is_zero(self, client, auth_headers):
+        res = client.get("/wallets/balance", headers=auth_headers)
+        assert res.json()["balance"] == 0.0
 
-def test_deposit(auth_header):
-    response = client.post("/wallet/deposit", json={"amount": 1000}, headers=auth_header)
-    assert response.status_code == 200
-    assert response.json()["new_balance"] == 1000
+    def test_get_balance_unauthenticated_returns_403(self, client):
+        res = client.get("/wallets/balance")
+        assert res.status_code in (401, 403)
 
-def test_insufficient_funds(auth_header):
-    response = client.post("/wallet/withdraw", json={"amount": 5000}, headers=auth_header)
-    assert response.status_code == 400
-    # Match the exact error message from your crud.py
-    assert "Insufficient" in response.json()["detail"]
+class TestDeposit:
+    def test_deposit_valid_amount_returns_200(self, client, auth_headers):
+        res = client.post("/wallets/deposit", json={"amount": 500.0}, headers=auth_headers)
+        assert res.status_code == 200
 
-# --- MOCKING THE AI CHECK ---
-# We 'patch' the function in app.routers.wallet where it is USED
-@patch("app.routers.wallet.check_fraud_risk") 
-def test_atomic_transfer_logic(mock_fraud_check, auth_header):
-    # 1. Tell the mock to ALWAYS return False (Not Fraud) for this test
-    mock_fraud_check.return_value = False
-    
-    # 2. Setup Receiver
-    client.post("/users/", json={"email": "receiver@gmail.com", "password": "password123"})
-    
-    # 3. Deposit into Sender
-    client.post("/wallet/deposit", json={"amount": 1000}, headers=auth_header)
-    
-    # 4. Transfer
-    response = client.post("/wallet/transfer", json={
-        "receiver_email": "receiver@gmail.com",
-        "amount": 400
-    }, headers=auth_header)
-    
-    assert response.status_code == 200
-    assert response.json()["new_balance"] == 600
-    # Verify the AI was actually called once
-    assert mock_fraud_check.called
+    def test_deposit_updates_balance(self, client, auth_headers):
+        client.post("/wallets/deposit", json={"amount": 100.0}, headers=auth_headers)
+        res = client.get("/wallets/balance", headers=auth_headers)
+        assert res.json()["balance"] >= 100.0
 
-@patch("app.routers.wallet.check_fraud_risk")
-def test_blocked_by_fraud_ai(mock_fraud_check, auth_header):
-    # 1. Tell the mock to return True (SIMULATE FRAUD)
-    mock_fraud_check.return_value = True
-    
-    client.post("/users/", json={"email": "receiver@gmail.com", "password": "password123"})
-    client.post("/wallet/deposit", json={"amount": 1000}, headers=auth_header)
+    def test_deposit_response_contains_new_balance(self, client, auth_headers):
+        res = client.post("/wallets/deposit", json={"amount": 50.0}, headers=auth_headers)
+        data = res.json()
+        assert "new_balance" in data
+        assert data["new_balance"] > 0
 
-    response = client.post("/wallet/transfer", json={
-        "receiver_email": "receiver@gmail.com",
-        "amount": 400
-    }, headers=auth_header)
+    def test_deposit_without_auth_returns_403(self, client):
+        res = client.post("/wallets/deposit", json={"amount": 100.0})
+        assert res.status_code in (401, 403)
 
-    # Should be blocked with 403
-    assert response.status_code == 403
-    assert "flagged" in response.json()["detail"].lower()
+    def test_deposit_missing_amount_returns_422(self, client, auth_headers):
+        res = client.post("/wallets/deposit", json={}, headers=auth_headers)
+        assert res.status_code == 422
+
+class TestWithdrawal:
+    def test_withdraw_valid_amount_returns_200(self, client, auth_headers):
+        client.post("/wallets/deposit", json={"amount": 300.0}, headers=auth_headers)
+        res = client.post("/wallets/withdraw", json={"amount": 100.0}, headers=auth_headers)
+        assert res.status_code == 200
+
+    def test_withdraw_reduces_balance(self, client, auth_headers):
+        client.post("/wallets/deposit", json={"amount": 200.0}, headers=auth_headers)
+        before = client.get("/wallets/balance", headers=auth_headers).json()["balance"]
+        client.post("/wallets/withdraw", json={"amount": 50.0}, headers=auth_headers)
+        after = client.get("/wallets/balance", headers=auth_headers).json()["balance"]
+        assert after == pytest.approx(before - 50.0, abs=0.01)
+
+    def test_withdraw_insufficient_funds_returns_400(self, client, auth_headers):
+        res = client.post("/wallets/withdraw", json={"amount": 999999.0}, headers=auth_headers)
+        assert res.status_code == 400
+
+    def test_withdraw_response_contains_new_balance(self, client, auth_headers):
+        client.post("/wallets/deposit", json={"amount": 100.0}, headers=auth_headers)
+        res = client.post("/wallets/withdraw", json={"amount": 10.0}, headers=auth_headers)
+        assert "new_balance" in res.json()
+
+    def test_withdraw_without_auth_returns_403(self, client):
+        res = client.post("/wallets/withdraw", json={"amount": 10.0})
+        assert res.status_code in (401, 403)

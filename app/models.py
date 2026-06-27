@@ -1,9 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime,Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
-from sqlalchemy import column, interger, string, fload, foreignKey, DateTime, Index
-
 
 class User(Base):
     __tablename__ = "users"
@@ -38,9 +36,11 @@ class Transaction(Base):
 
     wallet = relationship("Wallet", back_populates="transactions")
 
-    __table_args__=(
+__table_args__ = (
         # accelerate querying a specific wallet transactional ledger history
-        Index("ix_transactons_wallet_id","wallet_id"),
+        Index("ix_transactons_wallet_id", "wallet_id"),
+        
+        # FIXED: Changed "wallet" to "wallet_id"
         # composite index to rapidly sort transactional data fields by time
-        Index("ix_transctions_wallet_timestamp", "wallet", "timestamp"),
+        Index("ix_transctions_wallet_timestamp", "wallet_id", "timestamp"),
     )

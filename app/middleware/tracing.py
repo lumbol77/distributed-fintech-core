@@ -5,7 +5,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-def setup_tracing(app):
+def setup_tracing(app): 
     # 1. Initialize the global tracer provider
     provider = TracerProvider()
     trace.set_tracer_provider(provider)
