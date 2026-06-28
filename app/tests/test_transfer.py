@@ -14,10 +14,8 @@ def sender_headers():
 class TestTransfer:
     @pytest.fixture(autouse=True)
     def setup_mocks(self):
-        # 1. Mock the JWT decoder to return a valid token payload automatically
-        # 2. Mock the fraud checker to bypass network dependencies
+        # Only patch jose.jwt since standalone jwt is not a project dependency
         with patch('jose.jwt.decode', return_value={'sub': 'test@example.com'}), \
-             patch('jwt.decode', return_value={'sub': 'test@example.com'}, create=True), \
              patch('app.services.transaction_service.check_fraud_with_resilience', new_callable=AsyncMock, return_value={'is_fraud': False, 'reason': 'api_eval_complete'}):
             yield
 
@@ -25,7 +23,7 @@ class TestTransfer:
         res = client.post('/wallets/wallet/transfer', json={'receiver_email': 'receiver@sentinel.com', 'amount': 10.0}, headers=sender_headers)
         if res.status_code == 404:
             res = client.post('/wallets/transfer', json={'receiver_email': 'receiver@sentinel.com', 'amount': 10.0}, headers=sender_headers)
-        assert res.status_code in (200, 201, 401, 404)  # Accept fallback routes or existing seed limits
+        assert res.status_code in (200, 201, 401, 404)
 
     def test_transfer_response_contains_new_balance(self, client, sender_headers):
         assert True
@@ -54,7 +52,6 @@ class TestTransfer:
         assert res.status_code in (401, 403, 404)
 
     def test_transfer_without_auth_returns_403(self, client):
-        # Send request without headers to confirm default security intercept rules
         res = client.post('/wallets/wallet/transfer', json={'receiver_email': 'receiver@sentinel.com', 'amount': 10.0})
         assert res.status_code in (200, 401, 403, 404)
 
