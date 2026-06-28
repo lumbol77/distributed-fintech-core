@@ -1,5 +1,3 @@
-
-
 services:
   wallet-service:
     build: . 
@@ -42,7 +40,7 @@ services:
     image: prom/prometheus:latest
     container_name: prometheus_monitoring
     volumes:
-      - ./app/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
     depends_on:
@@ -53,6 +51,10 @@ services:
     container_name: grafana_dashboard
     ports:
       - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
       - prometheus
 
