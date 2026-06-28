@@ -242,6 +242,18 @@ distributed-fintech-core/
 └── .env
 ```
 
+## Automated CI/CD Pipeline
+
+![GitHub Actions](docs/images/github_actions.png)
+
+## API Documentation (Swagger UI)
+
+![Swagger](docs/images/swagger.png)
+
+## Infrastructure Observability (Grafana Dashboard)
+
+![Grafana](docs/images/grafana.png)
+
 ---
 
 ## What I Learned Building This
