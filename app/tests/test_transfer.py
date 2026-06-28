@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from app.main import app
-from app.core.security import create_access_token
+from app.security import create_access_token
 
 @pytest.fixture
 def client():
